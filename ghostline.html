@@ -216,7 +216,13 @@
   }
   .fp-row:last-child{ border-bottom:none; }
   .fp-label{ color: var(--text); }
-  .fp-code{ color: var(--green); letter-spacing:1px; font-weight:600; }
+  .fp-code{ color: var(--green); letter-spacing:1px; font-weight:600; font-size:11px; }
+  .fp-verify{
+    margin-top:4px; background:none; border:1px solid var(--border); color: var(--text-dim);
+    padding: 3px 8px; font-size:10px; cursor:pointer; letter-spacing:.5px;
+  }
+  .fp-verify:hover{ border-color: var(--green-dim); color: var(--green); }
+  .fp-verify.ok{ border-color: var(--green-dim); color: var(--green); }
   #intro .card{ max-width: 460px; }
   .intro-text{ color: var(--text); font-size: 13px; line-height:1.6; margin-bottom: 4px; }
   .intro-block{ margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
@@ -237,7 +243,7 @@
 
       <div class="intro-block">
         <div class="intro-label">HOW IT WORKS</div>
-        <p class="intro-text">Messages are encrypted right in your browser before they ever leave your device (AES-256, the same standard banks use). The relay server that carries the messages only ever sees scrambled data, never your actual text or photos.</p>
+        <p class="intro-text">Messages are encrypted in your browser before they leave your device. Every message uses a fresh key from a ratcheting chain (borrowed from Signal's design), so even if a device is compromised later, earlier messages of the session stay unreadable. Your device keeps a persistent identity key that signs everything, so contacts get a stable safety number you can verify once and keep.</p>
       </div>
 
       <div class="intro-block">
@@ -247,8 +253,8 @@
 
       <div class="intro-block warn">
         <div class="intro-label">BE REALISTIC ABOUT THIS</div>
-        <p class="intro-text">This is not a replacement for Signal. It's a lightweight, open tool for casual private group chats. Don't use it for anything where your safety depends on it. If you need serious protection, use Signal.</p>
-        <p class="intro-text" style="margin-top:10px;">Also: the relay can't read anything, but it can still see <i>that</i> a channel is active — timing, message sizes, roughly how many people. Encryption hides content, not activity. And anyone who guesses your channel name can flood it with noise (they still can't read or write messages without the keyphrase).</p>
+        <p class="intro-text">This borrows real ideas from Signal, but it is still not Signal: a web page can be swapped out by whoever serves it to you, there's no self-healing after a device compromise, and none of this code has been independently audited. Don't use it for anything where your safety depends on it.</p>
+        <p class="intro-text" style="margin-top:10px;">Also: the relay can't read anything, but it can still see <i>that</i> a channel is active: timing, message sizes, roughly how many people. Encryption hides content, not activity. And anyone who guesses your channel name can flood it with noise (they still can't read or write messages without the keyphrase).</p>
       </div>
 
       <button class="primary" id="introEnterBtn" type="button">enter →</button>
@@ -269,7 +275,8 @@
       </div>
 
       <label>keyphrase</label>
-      <input type="password" id="passInput" placeholder="min. 6 characters" maxlength="60">
+      <input type="password" id="passInput" placeholder="min. 8 characters" maxlength="60">
+      <p style="font-size:10.5px; color:var(--text-dim); margin-top:6px; line-height:1.5;">The channel name is public-ish, so the keyphrase carries all the weight. Longer beats clever: four random words beat "P@ss123!".</p>
 
       <button class="primary" id="joinBtn" type="button" disabled>jack in →</button>
     </div>
@@ -290,8 +297,8 @@
       </div>
     </div>
     <div id="peerPanel">
-      <div class="panel-head">KEY FINGERPRINTS</div>
-      <p class="panel-note">Compare these codes with your friends in person or over a call. If someone's code doesn't match what they see on their screen, you are not talking to who you think you are.</p>
+      <div class="panel-head">SAFETY NUMBERS</div>
+      <p class="panel-note">Each number is derived from your identity key and theirs. It is the same on both screens and stable across sessions. Compare it over a call or in person, then tap "mark verified". If a verified contact's number ever changes, you'll get a warning: that's either a reinstall or an impersonator.</p>
       <div id="peerListBody"></div>
     </div>
     <div id="messages"></div>
@@ -360,7 +367,7 @@
   });
 
   function checkReady(){
-    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim() && passInput.value.trim().length >= 6);
+    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim() && passInput.value.trim().length >= 8);
   }
   nameInput.addEventListener('input', checkReady);
   roomInput.addEventListener('input', checkReady);
@@ -421,28 +428,115 @@
     return new TextDecoder().decode(plainBuf);
   }
 
-  // ---- forward secrecy layer ----
-  // AUTH_KEY (from the shared keyphrase) only ever encrypts the key-exchange
-  // handshake, never message content. Actual message keys come from a fresh
-  // ECDH keypair generated for this session and never leave the device — so
-  // even if the keyphrase leaks later, past messages can't be decrypted
-  // retroactively. New joiners can't decrypt messages sent before they
-  // arrived — that's expected, it's the same property, not a bug.
-  let MY_KEYPAIR = null;
+  // ---- forward secrecy + identity layer (v5) ----
+  // Three ideas borrowed from Signal, scaled down to what a static HTML file
+  // can honestly deliver:
+  //
+  // 1. IDENTITY KEYS. Each device keeps a long-lived ECDSA P-256 keypair
+  //    (persisted in localStorage where available). Hellos are signed with it,
+  //    so an ephemeral session key can't be swapped out silently. Pairs of
+  //    identities produce a stable "safety number". Verify it once, it stays
+  //    valid across sessions, and if a known contact ever shows up with a
+  //    different identity key you get a loud Signal-style warning.
+  //
+  // 2. SYMMETRIC RATCHET. Each pair of peers shares two HMAC-SHA256 chains
+  //    (one per direction) rooted in an ECDH handshake. Every message wrap
+  //    uses the next message key in the sender's chain and then the chain
+  //    advances; used keys are deleted. Compromise of the device state at time
+  //    T does not reveal messages before T. (No DH ratchet, so unlike Signal
+  //    there is no self-healing *after* a compromise. Stated, not hidden.)
+  //
+  // 3. SIGNED CONTROL MESSAGES. presence / reactions / purge carry an ECDSA
+  //    signature bound to the channel and a timestamp, so an insider with the
+  //    keyphrase can no longer spoof someone's name in presence or trigger a
+  //    purge pretending to be someone else.
+  //
+  // The keyphrase-derived key still only protects the handshake and control
+  // traffic, never content.
+  let MY_KEYPAIR = null;        // ephemeral ECDH, this session only
   let MY_PUB_RAW_B64 = null;
-  let MY_FP = null;
-  let PEER_KEYS = new Map(); // fingerprint -> { aesKey, name }
+  let MY_FP = null;             // fingerprint of the ephemeral key (session id)
+  let MY_ID_KEYPAIR = null;     // persistent ECDSA identity
+  let MY_ID_PUB_B64 = null;
+  let MY_ID_FP = null;          // fingerprint of the identity key
+  let PEER_KEYS = new Map();    // ephFp -> { name, idFp, sendCK, sendN, recvCK, recvN, skipped:Map }
+  let ID_VERIFY_KEYS = new Map(); // idFp -> imported ECDSA verify key
+  const MAX_SKIPPED_KEYS = 512; // bound on out-of-order tolerance, also a DoS cap
 
   async function fingerprintOf(pubRawB64){
     const digest = await crypto.subtle.digest('SHA-256', b64ToBuf(pubRawB64));
     return bufToB64(digest).replace(/[+/=]/g, '').slice(0, 12);
   }
 
+  // localStorage may be unavailable (private mode, file:// quirks). Degrade to
+  // an ephemeral identity rather than breaking: everything still works, you
+  // just lose verification persistence across sessions.
+  function storageGet(k){ try{ return localStorage.getItem(k); } catch(e){ return null; } }
+  function storageSet(k, v){ try{ localStorage.setItem(k, v); return true; } catch(e){ return false; } }
+
+  async function loadOrCreateIdentity(){
+    const stored = storageGet('ghostline_identity_v5');
+    if(stored){
+      try{
+        const jwk = JSON.parse(stored);
+        const priv = await crypto.subtle.importKey('jwk', jwk.priv, { name:'ECDSA', namedCurve:'P-256' }, true, ['sign']);
+        const pub = await crypto.subtle.importKey('jwk', jwk.pub, { name:'ECDSA', namedCurve:'P-256' }, true, ['verify']);
+        MY_ID_KEYPAIR = { privateKey: priv, publicKey: pub };
+      } catch(e){ MY_ID_KEYPAIR = null; }
+    }
+    if(!MY_ID_KEYPAIR){
+      MY_ID_KEYPAIR = await crypto.subtle.generateKey({ name:'ECDSA', namedCurve:'P-256' }, true, ['sign','verify']);
+      try{
+        const privJwk = await crypto.subtle.exportKey('jwk', MY_ID_KEYPAIR.privateKey);
+        const pubJwk = await crypto.subtle.exportKey('jwk', MY_ID_KEYPAIR.publicKey);
+        storageSet('ghostline_identity_v5', JSON.stringify({ priv: privJwk, pub: pubJwk }));
+      } catch(e){ /* ephemeral identity this session */ }
+    }
+    const rawIdPub = await crypto.subtle.exportKey('raw', MY_ID_KEYPAIR.publicKey);
+    MY_ID_PUB_B64 = bufToB64(rawIdPub);
+    MY_ID_FP = await fingerprintOf(MY_ID_PUB_B64);
+  }
+
+  // known contacts: idFp -> { name, verified, firstSeen }. This is what makes
+  // "safety number changed" detection possible across sessions.
+  function loadKnownPeers(){
+    try{ return JSON.parse(storageGet('ghostline_known_v5') || '{}'); } catch(e){ return {}; }
+  }
+  function saveKnownPeers(obj){ storageSet('ghostline_known_v5', JSON.stringify(obj)); }
+
+  // Signal-style safety number: stable digits derived from both identity
+  // keys, same on both screens, independent of session keys.
+  async function safetyNumberFor(idFpA, idFpB){
+    const canon = 'ghostline-sn-v5|' + [idFpA, idFpB].sort().join('|');
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canon)));
+    const groups = [];
+    for(let i=0; i<6; i++){
+      const chunk = (digest[i*4] << 24 >>> 0) + (digest[i*4+1] << 16) + (digest[i*4+2] << 8) + digest[i*4+3];
+      groups.push(String(chunk % 100000).padStart(5, '0'));
+    }
+    return groups.join(' ');
+  }
+
+  async function signCanon(str){
+    const sig = await crypto.subtle.sign(
+      { name:'ECDSA', hash:'SHA-256' }, MY_ID_KEYPAIR.privateKey, new TextEncoder().encode(str)
+    );
+    return bufToB64(sig);
+  }
+  async function verifyCanon(idFp, sigB64, str){
+    const key = ID_VERIFY_KEYS.get(idFp);
+    if(!key || !sigB64) return false;
+    try{
+      return await crypto.subtle.verify(
+        { name:'ECDSA', hash:'SHA-256' }, key, b64ToBuf(sigB64), new TextEncoder().encode(str)
+      );
+    } catch(e){ return false; }
+  }
+
   async function generateSessionKeypair(){
     MY_KEYPAIR = await crypto.subtle.generateKey(
-      // deriveBits is required as well as deriveKey: we no longer hand the raw
-      // ECDH output straight to AES-GCM, we pull the bits out and run them
-      // through HKDF first (see derivePairKey).
+      // deriveBits is required: we never hand raw ECDH output to AES-GCM (a
+      // well-known WebCrypto footgun); it goes through HKDF first.
       { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']
     );
     const rawPub = await crypto.subtle.exportKey('raw', MY_KEYPAIR.publicKey);
@@ -450,45 +544,113 @@
     MY_FP = await fingerprintOf(MY_PUB_RAW_B64);
   }
 
-  // The raw output of ECDH is the x-coordinate of a curve point. It is secret,
-  // but it is not uniformly random: it has algebraic structure and bias, so it
-  // is not safe to use directly as a symmetric key. WebCrypto will happily let
-  // you do exactly that via deriveKey(ECDH -> AES-GCM), which is a well-known
-  // footgun. Instead we take the bits and run them through HKDF, which is what
-  // the shared secret is supposed to be fed into.
-  //
-  // The channel and both fingerprints are bound into the derivation, in a fixed
-  // order so both sides compute the same value. That domain-separates the key:
-  // the same two people in a different channel get a different key.
-  async function derivePairKey(peerPubKey, peerFp){
+  // ---- ratchet primitives ----
+  // Standard KDF-chain construction: mk_n = HMAC(ck_n, 0x01),
+  // ck_{n+1} = HMAC(ck_n, 0x02). Chain keys are kept as raw bytes so old ones
+  // can be dropped as soon as the chain advances.
+  async function hmacStep(ckBytes, label){
+    const key = await crypto.subtle.importKey('raw', ckBytes, { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
+    return new Uint8Array(await crypto.subtle.sign('HMAC', key, new Uint8Array([label])));
+  }
+  async function mkToAesKey(mkBytes, usages){
+    return crypto.subtle.importKey('raw', mkBytes, { name:'AES-GCM' }, false, usages);
+  }
+
+  // Two chains per pair, one per direction, both rooted in the ECDH secret and
+  // domain-separated by channel, the two identity fps, and the sending
+  // ephemeral fp. Each side derives both and keeps its own as the send chain.
+  async function deriveChains(peerPubKey, peerEphFp, peerIdFp){
     const enc = new TextEncoder();
     const sharedBits = await crypto.subtle.deriveBits(
       { name: 'ECDH', public: peerPubKey }, MY_KEYPAIR.privateKey, 256
     );
-    const hkdfMaterial = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
-    const pair = [MY_FP, peerFp].sort().join('|');
-    return crypto.subtle.deriveKey(
-      {
-        name: 'HKDF',
-        hash: 'SHA-256',
-        salt: enc.encode('ghostline-v1|' + TOPIC),
-        info: enc.encode('pairwise|' + pair)
-      },
-      hkdfMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
+    const hkdfMaterial = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveBits']);
+    const ids = [MY_ID_FP, peerIdFp].sort().join('|');
+    async function chainFor(senderEphFp){
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: 'HKDF', hash: 'SHA-256',
+          salt: enc.encode('ghostline-v5|' + TOPIC),
+          info: enc.encode('chain|' + ids + '|' + senderEphFp)
+        },
+        hkdfMaterial, 256
+      );
+      return new Uint8Array(bits);
+    }
+    return {
+      sendCK: await chainFor(MY_FP),
+      recvCK: await chainFor(peerEphFp)
+    };
   }
 
-  async function addPeer(pubRawB64, name){
+  // Sender side: consume the next key in our send chain toward this peer.
+  // Mutates peer state: the previous chain key is gone after this returns.
+  async function wrapForPeer(peer, ephFp, rawKeyBytes){
+    const mk = await hmacStep(peer.sendCK, 1);
+    const nextCK = await hmacStep(peer.sendCK, 2);
+    const n = peer.sendN;
+    peer.sendCK = nextCK;
+    peer.sendN = n + 1;
+    const aes = await mkToAesKey(mk, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const wrapped = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, aes, rawKeyBytes);
+    return { fp: ephFp, n, iv: bufToB64(iv), key: bufToB64(wrapped) };
+  }
+
+  // Receiver side. CRITICAL PROPERTY: no state is mutated unless decryption
+  // actually succeeds, because callers probe candidate senders and a failed
+  // probe must not corrupt or advance the wrong peer's chain. Skipped message
+  // keys are cached (bounded) so out-of-order relay delivery still decrypts.
+  async function unwrapFromPeer(peer, wrap){
+    const iv = new Uint8Array(b64ToBuf(wrap.iv));
+    const ct = b64ToBuf(wrap.key);
+    const n = wrap.n | 0;
+
+    if(n < peer.recvN){
+      const mk = peer.skipped.get(n);
+      if(!mk) throw new Error('message key already used or evicted');
+      const aes = await mkToAesKey(mk, ['decrypt']);
+      const raw = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, aes, ct);
+      peer.skipped.delete(n); // burn after use, replays now fail
+      return new Uint8Array(raw);
+    }
+
+    const gap = n - peer.recvN;
+    if(gap > MAX_SKIPPED_KEYS) throw new Error('chain gap too large');
+    if(peer.skipped.size + gap > MAX_SKIPPED_KEYS) throw new Error('too many skipped keys');
+
+    let ck = peer.recvCK;
+    const skippedNew = [];
+    for(let i = peer.recvN; i < n; i++){
+      skippedNew.push([i, await hmacStep(ck, 1)]);
+      ck = await hmacStep(ck, 2);
+    }
+    const mk = await hmacStep(ck, 1);
+    const ckAfter = await hmacStep(ck, 2);
+    const aes = await mkToAesKey(mk, ['decrypt']);
+    const raw = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, aes, ct); // throws on wrong sender
+    // commit only now
+    for(const [i, k] of skippedNew) peer.skipped.set(i, k);
+    peer.recvCK = ckAfter;
+    peer.recvN = n + 1;
+    return new Uint8Array(raw);
+  }
+
+  async function addPeer(pubRawB64, idPubB64, name){
     const fp = await fingerprintOf(pubRawB64);
     if(fp === MY_FP) return false;
+    const idFp = await fingerprintOf(idPubB64);
 
-    // A peer's name is bound to their key on first sight. If a later 'hello'
-    // arrives with the same name but a different key, or the same key claiming
-    // a different name, treat it as suspicious rather than silently accepting:
-    // that's what an impersonation attempt inside the channel looks like.
+    // register the identity verify key (needed for control-message sigs)
+    if(!ID_VERIFY_KEYS.has(idFp)){
+      try{
+        const vkey = await crypto.subtle.importKey(
+          'raw', b64ToBuf(idPubB64), { name:'ECDSA', namedCurve:'P-256' }, false, ['verify']
+        );
+        ID_VERIFY_KEYS.set(idFp, vkey);
+      } catch(e){ return false; }
+    }
+
     const existing = PEER_KEYS.get(fp);
     if(existing){
       if(existing.name !== name){
@@ -497,25 +659,58 @@
       return false;
     }
     for(const [otherFp, peer] of PEER_KEYS){
-      if(peer.name === name){
-        flagSuspicious(`two different keys are claiming the handle "${name}" (${otherFp} and ${fp}). Verify fingerprints before trusting either`);
+      if(peer.name === name && peer.idFp !== idFp){
+        flagSuspicious(`two different identities are claiming the handle "${name}". Verify safety numbers before trusting either`);
       }
     }
+
+    // Signal-style continuity check: if we've ever known this handle under a
+    // different identity key, that's exactly what "safety number changed"
+    // means. Could be a reinstall/new device, or an impersonator. Either way
+    // the user must re-verify, not us silently accepting.
+    const known = loadKnownPeers();
+    let wasVerified = false;
+    for(const [kFp, entry] of Object.entries(known)){
+      if(entry.name === name && kFp !== idFp){
+        flagSuspicious(`safety number changed for "${name}" (identity ${kFp} → ${idFp}). If they reinstalled that's normal, but verify again before trusting`);
+        if(entry.verified){ entry.verified = false; known[kFp] = entry; }
+      }
+    }
+    if(known[idFp]){
+      wasVerified = !!known[idFp].verified;
+      if(known[idFp].name !== name){
+        const sys = document.createElement('div');
+        sys.className = 'sys';
+        sys.textContent = `// note: identity ${idFp} was previously using the handle "${known[idFp].name}", now "${name}"`;
+        messagesEl.appendChild(sys);
+      }
+      known[idFp].name = name;
+    } else {
+      known[idFp] = { name, verified: false, firstSeen: Date.now() };
+    }
+    saveKnownPeers(known);
 
     const peerPubKey = await crypto.subtle.importKey(
       'raw', b64ToBuf(pubRawB64), { name: 'ECDH', namedCurve: 'P-256' }, false, []
     );
-    const aesKey = await derivePairKey(peerPubKey, fp);
-    PEER_KEYS.set(fp, { aesKey, name });
+    const chains = await deriveChains(peerPubKey, fp, idFp);
+    PEER_KEYS.set(fp, {
+      name, idFp,
+      sendCK: chains.sendCK, sendN: 0,
+      recvCK: chains.recvCK, recvN: 0,
+      skipped: new Map()
+    });
     updatePeerListUI();
     updateSendability();
 
     // Keys are trusted on first sight (there is no server to vouch for
-    // anyone), so make that moment visible instead of silent: the fingerprint
-    // panel only protects people who actually open it.
+    // anyone), so make that moment visible instead of silent.
+    const sn = await safetyNumberFor(MY_ID_FP, idFp);
     const sys = document.createElement('div');
     sys.className = 'sys';
-    sys.textContent = `// ${name} connected · key ${fp} — tap 🔑 and compare codes over a call or in person if this chat matters`;
+    sys.textContent = wasVerified
+      ? `// ${name} connected · identity ${idFp} · verified ✓`
+      : `// ${name} connected · safety number ${sn}. Tap 🔑 and compare over a call or in person if this chat matters`;
     messagesEl.appendChild(sys);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
@@ -523,8 +718,17 @@
   }
 
   async function sendHello(){
-    if(!MY_PUB_RAW_B64 || !CRYPTO_KEY) return;
-    const hello = JSON.stringify({ type: 'hello', from: NAME, pub: MY_PUB_RAW_B64 });
+    if(!MY_PUB_RAW_B64 || !CRYPTO_KEY || !MY_ID_KEYPAIR) return;
+    // The signature binds the ephemeral session key to the persistent
+    // identity and to this channel: an insider with the keyphrase can still
+    // send their own hello, but can't attach someone else's identity to a key
+    // they control, and can't replay this hello into a different channel.
+    const canon = ['hello', TOPIC, MY_PUB_RAW_B64, MY_ID_PUB_B64, NAME].join('|');
+    const sig = await signCanon(canon);
+    const hello = JSON.stringify({
+      type: 'hello', v: 5, from: NAME,
+      pub: MY_PUB_RAW_B64, idpub: MY_ID_PUB_B64, sig
+    });
     try{
       await fetch(`https://ntfy.sh/${TOPIC}`, { method: 'POST', body: await encryptText(hello, CRYPTO_KEY) });
     } catch(e){ console.log('hello broadcast failed', e); }
@@ -583,23 +787,21 @@
 
     const wraps = [];
     for(const [fp, peer] of PEER_KEYS){
-      const wivB = crypto.getRandomValues(new Uint8Array(12));
-      const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wivB }, peer.aesKey, rawMsgKey);
-      wraps.push({ fp, iv: bufToB64(wivB), key: bufToB64(wrapped) });
+      wraps.push(await wrapForPeer(peer, fp, rawMsgKey));
     }
-    // sfp is a *hint*, not proof: it tells the receiver which pairwise key to
-    // try first instead of looping through all of them. Actual sender identity
-    // still comes only from which pairwise key successfully unwraps.
+    // sfp is a *hint*, not proof: it tells the receiver which pairwise chain
+    // to try first. Actual sender identity still comes only from which chain
+    // successfully unwraps.
     return { iv: bufToB64(iv), ct: bufToB64(ciphertext), wraps, sfp: MY_FP };
   }
 
   async function decryptEnvelope(envelope){
     const mine = envelope.wraps.find(w => w.fp === MY_FP);
     if(!mine) throw new Error('no key for us yet (sender didn\'t have our handshake)');
-    // The wrap is per-recipient, so identifying the sender means finding which
-    // pairwise key unwraps it. envelope.sfp (if present) is an unauthenticated
-    // hint for which key to try first; lying about it just wastes the liar one
-    // decryption attempt, because identity is decided by what actually unwraps.
+    // The wrap is per-recipient; identifying the sender means finding whose
+    // send chain unwraps it. envelope.sfp (if present) is an unauthenticated
+    // hint for which chain to try first; lying about it costs the liar one
+    // failed probe, because unwrapFromPeer only commits state on success.
     const tryOrder = [];
     if(envelope.sfp && PEER_KEYS.has(envelope.sfp)) tryOrder.push(envelope.sfp);
     for(const fp of PEER_KEYS.keys()){
@@ -608,41 +810,70 @@
     for(const fp of tryOrder){
       const peer = PEER_KEYS.get(fp);
       try{
-        const rawMsgKey = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(mine.iv)) }, peer.aesKey, b64ToBuf(mine.key)
-        );
+        const rawMsgKey = await unwrapFromPeer(peer, mine);
         const msgKey = await crypto.subtle.importKey('raw', rawMsgKey, { name: 'AES-GCM' }, false, ['decrypt']);
         const plainBuf = await crypto.subtle.decrypt(
           { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(envelope.iv)) }, msgKey, b64ToBuf(envelope.ct)
         );
         return { text: unpadText(new Uint8Array(plainBuf)), fromFp: fp };
-      } catch(e){ /* try next peer key */ }
+      } catch(e){ /* try next peer chain */ }
     }
     throw new Error('could not decrypt envelope');
   }
 
-  function updatePeerListUI(){
+  async function updatePeerListUI(){
     const el = document.getElementById('peerListBody');
     if(!el) return;
     if(PEER_KEYS.size === 0){
       el.innerHTML = '<div class="sys">// no one else has connected yet</div>';
       return;
     }
-    let html = `<div class="fp-row"><span class="fp-label">you</span><span class="fp-code">${MY_FP}</span></div>`;
+    const known = loadKnownPeers();
+    el.innerHTML = '';
     for(const [fp, peer] of PEER_KEYS){
-      html += `<div class="fp-row"><span class="fp-label">${escapeHtml(peer.name)}</span><span class="fp-code">${fp}</span></div>`;
+      const sn = await safetyNumberFor(MY_ID_FP, peer.idFp);
+      const verified = !!(known[peer.idFp] && known[peer.idFp].verified);
+      const row = document.createElement('div');
+      row.className = 'fp-row';
+      const label = document.createElement('span');
+      label.className = 'fp-label';
+      label.textContent = peer.name;
+      const right = document.createElement('span');
+      right.style.textAlign = 'right';
+      const snEl = document.createElement('div');
+      snEl.className = 'fp-code';
+      snEl.textContent = sn;
+      const btn = document.createElement('button');
+      btn.className = 'fp-verify' + (verified ? ' ok' : '');
+      btn.type = 'button';
+      btn.textContent = verified ? '✓ verified' : 'mark verified';
+      btn.addEventListener('click', ()=>{
+        // Marking verified means: "I compared this number with them over a
+        // channel the relay can't touch, and it matched." It persists per
+        // identity, so it survives sessions, and gets loudly reset if the
+        // identity key ever changes.
+        const k = loadKnownPeers();
+        if(!k[peer.idFp]) k[peer.idFp] = { name: peer.name, firstSeen: Date.now() };
+        k[peer.idFp].verified = !verified;
+        saveKnownPeers(k);
+        updatePeerListUI();
+      });
+      right.appendChild(snEl);
+      right.appendChild(btn);
+      row.appendChild(label);
+      row.appendChild(right);
+      el.appendChild(row);
     }
-    el.innerHTML = html;
   }
   // Attachments (photos, voice notes) get the same envelope treatment as text:
   // a fresh random key per file, wrapped individually for each peer via their
   // ECDH-derived key. Previously these were encrypted directly under the
-  // keyphrase-derived key, which meant photos and voice — arguably the most
-  // sensitive content here — had no forward secrecy at all while text did.
+  // keyphrase-derived key, which meant photos and voice (arguably the most
+  // sensitive content here) had no forward secrecy at all while text did.
   //
   // Wire format:
   //   [4-byte big-endian header length][header JSON][12-byte iv][ciphertext]
-  // where header JSON = { wraps: [{ fp, iv, key }, ...] }
+  // where header JSON = { wraps: [{ fp, n, iv, key }, ...], sfp }
   async function encryptBinary(metaObj, fileBuf){
     const enc = new TextEncoder();
     const metaBytes = enc.encode(JSON.stringify(metaObj));
@@ -660,9 +891,7 @@
 
     const wraps = [];
     for(const [fp, peer] of PEER_KEYS){
-      const wiv = crypto.getRandomValues(new Uint8Array(12));
-      const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wiv }, peer.aesKey, rawFileKey);
-      wraps.push({ fp, iv: bufToB64(wiv), key: bufToB64(wrapped) });
+      wraps.push(await wrapForPeer(peer, fp, rawFileKey));
     }
     const headerBytes = enc.encode(JSON.stringify({ wraps, sfp: MY_FP })); // sfp = hint only, see decryptEnvelope
     const headerLen = new Uint8Array(4);
@@ -694,9 +923,7 @@
     for(const fp of tryOrder){
       const peer = PEER_KEYS.get(fp);
       try{
-        const rawFileKey = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(mine.iv)) }, peer.aesKey, b64ToBuf(mine.key)
-        );
+        const rawFileKey = await unwrapFromPeer(peer, mine);
         const fileKey = await crypto.subtle.importKey('raw', rawFileKey, { name: 'AES-GCM' }, false, ['decrypt']);
         const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, fileKey, ct);
         const plain = new Uint8Array(plainBuf);
@@ -713,7 +940,9 @@
   function scrollToBottom(){ messagesEl.scrollTop = messagesEl.scrollHeight; }
 
   function clearEmptyState(){
-    const empty = messagesEl.querySelector('.sys');
+    // only ever remove the placeholder; the first .sys node might be a real
+    // note (peer connected, burn hint), not the "room is empty" line
+    const empty = messagesEl.querySelector('.sys.empty-state');
     if(empty) empty.remove();
   }
 
@@ -781,12 +1010,18 @@
   }
 
   function showEmptyState(){
-    messagesEl.innerHTML = '<div class="sys">// room is empty. send the first message.</div>';
+    messagesEl.innerHTML = '<div class="sys empty-state">// room is empty. send the first message.</div>';
     msgElementsByMid.clear();
   }
 
-  function sendReaction(targetMid, emoji){
-    const payload = JSON.stringify({ type:'reaction', from: NAME, targetMid, emoji, mid: genMid() });
+  async function sendReaction(targetMid, emoji){
+    const ts = Date.now();
+    const mid = genMid();
+    seenMids.add(mid);
+    const canon = ['reaction', TOPIC, NAME, MY_ID_FP, ts, targetMid, emoji, mid].join('|');
+    const sig = await signCanon(canon);
+    const payload = JSON.stringify({ type:'reaction', from: NAME, idfp: MY_ID_FP, ts, targetMid, emoji, mid, sig });
+    renderReaction(targetMid, emoji); // own echo is skipped (own idfp), so show it locally
     encryptText(payload, CRYPTO_KEY).then(encrypted=>{
       fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
     });
@@ -840,11 +1075,30 @@
     presenceLabel.innerHTML = online.length ? `online: <b>${online.map(escapeHtml).join(', ')}</b>` : '';
   }
 
-  function sendPresence(){
-    const payload = JSON.stringify({ type:'presence', from: NAME });
+  async function sendPresence(){
+    if(!MY_ID_KEYPAIR) return;
+    const ts = Date.now();
+    const canon = ['presence', TOPIC, NAME, MY_ID_FP, ts].join('|');
+    const sig = await signCanon(canon);
+    const payload = JSON.stringify({ type:'presence', from: NAME, idfp: MY_ID_FP, ts, sig });
     encryptText(payload, CRYPTO_KEY).then(encrypted=>{
       fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
     });
+  }
+
+  // Control messages are signed by the sender's identity key. Freshness
+  // window stops an insider from replaying an old signed message (e.g. a
+  // purge from last week) after decrypting it with the keyphrase.
+  const CONTROL_FRESH_MS = 5 * 60 * 1000;
+  function controlNameFor(idfp){
+    for(const [, peer] of PEER_KEYS){ if(peer.idFp === idfp) return peer.name; }
+    return null;
+  }
+  async function controlValid(parsed, canonParts){
+    if(!parsed.idfp || parsed.idfp === MY_ID_FP) return false; // own echo or malformed
+    if(!ID_VERIFY_KEYS.has(parsed.idfp)) return false;         // never handshaked
+    if(typeof parsed.ts !== 'number' || Math.abs(Date.now() - parsed.ts) > CONTROL_FRESH_MS) return false;
+    return verifyCanon(parsed.idfp, parsed.sig, canonParts.join('|'));
   }
 
   async function handleIncoming(data){
@@ -893,21 +1147,32 @@
       const ts = (data.time || Date.now()/1000) * 1000;
 
       if(parsed.type === 'presence'){
-        presenceMap.set(parsed.from, Date.now());
+        const ok = await controlValid(parsed, ['presence', TOPIC, parsed.from, parsed.idfp, parsed.ts]);
+        if(!ok) return;
+        // trust the identity binding, not the claimed string
+        const boundName = controlNameFor(parsed.idfp) || parsed.from;
+        presenceMap.set(boundName, Date.now());
         updatePresenceLabel();
         return;
       }
       if(parsed.type === 'reaction'){
+        const ok = await controlValid(parsed, ['reaction', TOPIC, parsed.from, parsed.idfp, parsed.ts, parsed.targetMid, parsed.emoji, parsed.mid]);
+        if(!ok) return;
+        if(parsed.mid && seenMids.has(parsed.mid)) return; // replay of a still-fresh reaction
+        if(parsed.mid) seenMids.add(parsed.mid);
         renderReaction(parsed.targetMid, parsed.emoji);
         return;
       }
       if(parsed.type === 'purge'){
+        const ok = await controlValid(parsed, ['purge', TOPIC, parsed.from, parsed.idfp, parsed.ts]);
+        if(!ok) return;
+        const boundName = controlNameFor(parsed.idfp) || parsed.from || 'someone';
         releaseObjectUrlsIn(messagesEl);
         messagesEl.innerHTML = '';
         msgElementsByMid.clear();
         const sys = document.createElement('div');
         sys.className = 'sys';
-        sys.textContent = `// channel view cleared by ${parsed.from || 'someone'} (message history on the relay still expires naturally)`;
+        sys.textContent = `// channel view cleared by ${boundName} (message history on the relay still expires naturally)`;
         messagesEl.appendChild(sys);
         return;
       }
@@ -915,7 +1180,28 @@
         // Don't rely on name matching to spot our own echo: two people can pick
         // the same handle. Compare the key itself.
         if(parsed.pub === MY_PUB_RAW_B64) return;
-        const isNew = await addPeer(parsed.pub, parsed.from);
+        if(!parsed.idpub || !parsed.sig) return; // pre-v5 client or malformed
+
+        // Verify BEFORE trusting anything. The hello is self-certifying: the
+        // signature proves the sender holds the identity's private key and
+        // binds the ephemeral key, the handle, and this channel to it. Without
+        // this check, an insider could attach someone else's identity to a key
+        // they control, or replay a hello into a different channel.
+        try{
+          const vkey = await crypto.subtle.importKey(
+            'raw', b64ToBuf(parsed.idpub), { name:'ECDSA', namedCurve:'P-256' }, false, ['verify']
+          );
+          const canon = ['hello', TOPIC, parsed.pub, parsed.idpub, parsed.from].join('|');
+          const ok = await crypto.subtle.verify(
+            { name:'ECDSA', hash:'SHA-256' }, vkey, b64ToBuf(parsed.sig), new TextEncoder().encode(canon)
+          );
+          if(!ok){
+            flagSuspicious(`a hello for "${parsed.from || 'unknown'}" carried an invalid identity signature. Ignored`);
+            return;
+          }
+        } catch(e){ return; }
+
+        const isNew = await addPeer(parsed.pub, parsed.idpub, parsed.from);
         // Reply once, and only to peers we hadn't seen before. Without this,
         // whoever joined first never learns the newcomer's key unless their own
         // original hello happens to still be in the relay's backlog window, and
@@ -928,8 +1214,8 @@
         // Our own echo is caught by mid (added to seenMids on send), NOT by
         // comparing display names: two people can legitimately pick the same
         // handle, and a name check would silently drop the other person's
-        // messages. (Our own echo also can't decrypt anyway — we don't wrap
-        // the message key for ourselves — but the mid check makes the skip
+        // messages. (Our own echo also can't decrypt anyway, since we don't wrap
+        // the message key for ourselves, but the mid check makes the skip
         // explicit and free.)
         if(parsed.mid && seenMids.has(parsed.mid)){
           return; // replay, or our own echo
@@ -951,7 +1237,7 @@
 
           addMessage(trustedName, text, ts, parsed.mid, parsed.burn);
         } catch(e){
-          // we don't have keys for this sender yet — expected if they joined
+          // we don't have keys for this sender yet; expected if they joined
           // before us, or we're still exchanging handshakes
           console.log('no key yet for this message, skipping');
         }
@@ -971,6 +1257,7 @@
       for(const line of lines){
         try{ await handleIncoming(JSON.parse(line)); } catch(e){}
       }
+      clearEmptyState(); // drop the "loading history" placeholder in any case
       if(messagesEl.children.length === 0) showEmptyState();
     } catch(e){
       console.error('backlog load failed', e);
@@ -1004,17 +1291,24 @@
     NAME = nameInput.value.trim().slice(0,20);
     ROOM = roomInput.value.trim();
     TOPIC = topicFromRoom(ROOM);
+    if(TOPIC === 'ghostline-e2e-'){
+      alert('The channel name needs at least one letter or number.');
+      return;
+    }
     roomLabel.textContent = ROOM;
 
     joinBtn.disabled = true;
     joinBtn.textContent = 'generating key...';
-    CRYPTO_KEY = await deriveKey(passInput.value, TOPIC);
-    await generateSessionKeypair();
+    // trim: phone keyboards love to append a trailing space, and two people
+    // typing "phrase" and "phrase " would silently derive different keys
+    CRYPTO_KEY = await deriveKey(passInput.value.trim(), TOPIC);
+    await loadOrCreateIdentity();   // persistent ECDSA identity (signs hellos + control msgs)
+    await generateSessionKeypair(); // fresh ECDH per session (forward secrecy boundary)
     joinBtn.textContent = 'jack in →';
 
     landing.style.display = 'none';
     chatEl.classList.add('show');
-    messagesEl.innerHTML = '<div class="sys">// loading history...</div>';
+    messagesEl.innerHTML = '<div class="sys empty-state">// loading history...</div>';
     await loadBacklog();
     connectLive();
 
@@ -1046,6 +1340,7 @@
     seenIds = new Set();
     seenMids = new Set();
     PEER_KEYS.clear();
+    ID_VERIFY_KEYS.clear();
     MY_KEYPAIR = null;
     MY_PUB_RAW_B64 = null;
     MY_FP = null;
@@ -1071,7 +1366,7 @@
         if(pub && pub.id) seenIds.add(pub.id); // skip our own SSE echo entirely
       } catch(e){ /* non-fatal: mid check catches the echo anyway */ }
       msginput.value = '';
-      // show it locally right away — we don't wrap a copy for ourselves,
+      // show it locally right away; we don't wrap a copy for ourselves,
       // so it won't come back to us over the wire
       addMessage(NAME, text, Date.now(), mid, burnMode);
     } catch(e){
@@ -1106,7 +1401,7 @@
       burnNoteShown = true;
       const sys = document.createElement('div');
       sys.className = 'sys';
-      sys.textContent = '// burn mode: messages fade from everyone\'s screen after 20s. This is a courtesy, not a guarantee — it can\'t prevent screenshots, and the encrypted copy stays on the relay until it expires (~12h).';
+      sys.textContent = '// burn mode: messages fade from everyone\'s screen after 20s. This is a courtesy, not a guarantee: it can\'t prevent screenshots, and the encrypted copy stays on the relay until it expires (~12h).';
       messagesEl.appendChild(sys);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
@@ -1123,9 +1418,20 @@
     }
   });
 
-  purgeBtn.addEventListener('click', ()=>{
+  purgeBtn.addEventListener('click', async ()=>{
     if(!confirm('Clear the channel view for everyone currently online? (Does not affect relay retention.)')) return;
-    const payload = JSON.stringify({ type:'purge', from: NAME });
+    const ts = Date.now();
+    const canon = ['purge', TOPIC, NAME, MY_ID_FP, ts].join('|');
+    const sig = await signCanon(canon);
+    const payload = JSON.stringify({ type:'purge', from: NAME, idfp: MY_ID_FP, ts, sig });
+    // clear our own view immediately (own echo is skipped by idfp)
+    releaseObjectUrlsIn(messagesEl);
+    messagesEl.innerHTML = '';
+    msgElementsByMid.clear();
+    const sys = document.createElement('div');
+    sys.className = 'sys';
+    sys.textContent = '// channel view cleared (message history on the relay still expires naturally)';
+    messagesEl.appendChild(sys);
     encryptText(payload, CRYPTO_KEY).then(encrypted=>{
       fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
     });
@@ -1266,11 +1572,12 @@
 
   // ---- boot sequence ----
   const bootLines = [
-    "booting ghostline v4.1 ...",
+    "booting ghostline v5.0 ...",
     "initializing local terminal ... OK",
-    "loading webcrypto (AES-GCM 256) ... OK",
-    "connecting to relay ... OK",
-    "loading modules: presence, reactions, voice, burn ... OK",
+    "loading webcrypto (AES-GCM 256 / ECDH / ECDSA) ... OK",
+    "loading identity key ... OK",
+    "ratchet chains armed: per-message forward secrecy ... OK",
+    "loading modules: presence, reactions, voice, burn, safety numbers ... OK",
     "server sees ciphertext only. always.",
     "",
     "ready.",
