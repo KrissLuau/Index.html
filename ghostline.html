@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GHOSTLINE</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg: #05030a;
+    --bg-panel: #0d0818;
+    --green: #00e5ff;
+    --green-dim: #0891a8;
+    --amber: #ff2fd1;
+    --red: #ff4466;
+    --text: #d8c9f0;
+    --text-dim: #6b5f8a;
+    --border: #241a3a;
+  }
+  body.theme-amber{
+    --green: #ff2fd1;
+    --green-dim: #a8189e;
+    --amber: #00e5ff;
+    --text: #f0c9e8;
+    --text-dim: #7a5f8a;
+    --border: #2f1a3a;
+    --bg: #0a050a;
+    --bg-panel: #120b12;
+  }
+  body.theme-blue{
+    --green: #33c3ff;
+    --green-dim: #1c6f8a;
+    --amber: #ff6ec7;
+    --text: #c9e2e6;
+    --text-dim: #5f6f7a;
+    --border: #1a2e3a;
+    --bg: #06090a;
+    --bg-panel: #0b1012;
+  }
+
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    height: 100vh;
+    overflow: hidden;
+    transition: background .3s, color .3s;
+  }
+  body::before{
+    content:"";
+    position: fixed; inset:0;
+    pointer-events:none;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.15) 3px);
+    z-index: 999;
+    mix-blend-mode: overlay;
+  }
+  ::selection{ background: var(--green); color:#000; }
+  input, button, textarea{ font-family: inherit; }
+
+  #app{ height:100%; display:flex; flex-direction:column; }
+
+  #boot{
+    position: fixed; inset:0;
+    background: var(--bg);
+    z-index: 1000;
+    padding: 6vh 6vw;
+    font-size: 13px;
+    color: var(--green);
+    white-space: pre-wrap;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  #boot .cursor{ animation: blink 1s step-end infinite; }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  #landing{
+    height:100%; display:none; align-items:center; justify-content:center;
+    padding: 24px; overflow-y:auto;
+  }
+  .card{
+    width: 100%; max-width: 420px;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    padding: 28px 26px;
+    margin: auto;
+  }
+  .card h1{
+    font-family:'Space Mono',monospace; color: var(--green);
+    font-size: 22px; margin-bottom: 6px; text-shadow: 0 0 14px rgba(51,255,106,.35);
+  }
+  label{ display:block; font-size: 11px; letter-spacing:1px; text-transform:uppercase; color: var(--green-dim); margin: 16px 0 6px; }
+  label:first-of-type{ margin-top:0; }
+  input[type=text], input[type=password]{
+    width:100%; background:#000; border:1px solid var(--border); color:var(--text);
+    padding: 10px 12px; font-size:14px; outline:none;
+  }
+  input[type=text]:focus, input[type=password]:focus{ border-color: var(--green-dim); }
+  .row{ display:flex; gap:10px; }
+  .row input{ flex:1; }
+  .genbtn{
+    background: var(--bg-panel); border:1px solid var(--green-dim); color: var(--green);
+    padding: 0 12px; cursor:pointer; font-size:12px;
+  }
+  .genbtn:hover{ background: var(--green); color:#000; }
+  .primary{
+    margin-top: 22px; width:100%; padding: 12px; background: var(--green); color:#000;
+    border:none; font-weight:700; letter-spacing:.5px; cursor:pointer; font-size:14px;
+  }
+  .primary:hover{ background: #4dff85; }
+  .primary:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
+
+  #chat{ display:none; height:100%; flex-direction:column; }
+  #chat.show{ display:flex; }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-panel); font-size: 12px; gap: 8px; flex-wrap: wrap;
+  }
+  .topbar .left{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .topbar .room{ color: var(--green); }
+  .topbar .room b{ color: var(--amber); }
+  .topbar .status{ font-size: 10px; color: var(--text-dim); }
+  .topbar .status.live{ color: var(--green); }
+  .topbar .status.live::before{ content:"🔒 "; }
+  .topbar .status.down::before{ content:"● "; color: var(--red); }
+  .topbar .presence{ font-size: 10px; color: var(--text-dim); }
+  .topbar .presence b{ color: var(--green); }
+  .topbar .btns{ display:flex; gap:6px; }
+  .topbar button{
+    background:none; border:1px solid var(--border); color: var(--text-dim);
+    padding: 5px 9px; font-size: 11px; cursor:pointer;
+  }
+  .topbar button:hover{ border-color: var(--green-dim); color: var(--green); }
+  .topbar button.leave:hover{ border-color: var(--red); color: var(--red); }
+
+  #messages{
+    flex:1; overflow-y:auto; padding: 16px; font-size: 13.5px;
+  }
+  .msg{ margin-bottom: 14px; display:flex; gap:8px; position:relative; transition: opacity .8s ease; }
+  .msg.fading{ opacity: 0; }
+  .msg .ts{ color: var(--text-dim); font-size: 10px; white-space:nowrap; padding-top:2px; }
+  .msg .body{ flex:1; }
+  .msg .who{ color: var(--green); font-weight:600; }
+  .msg.me .who{ color: var(--amber); }
+  .msg .txt{ color: var(--text); word-break: break-word; cursor: pointer; }
+  .msg .burn-tag{ font-size:10px; color: var(--red); margin-left:6px; }
+  .sys{ color: var(--text-dim); font-size:11.5px; margin-bottom:12px; font-style:italic; }
+
+  .msg .img-wrap{ margin-top:4px; }
+  .msg .img-wrap img{
+    max-width: 220px; max-height: 260px; border-radius: 2px;
+    border: 1px solid var(--border); display:block;
+  }
+  .msg .img-loading{ color: var(--text-dim); font-size: 11px; font-style: italic; }
+  .msg audio{ margin-top:6px; max-width: 240px; height:32px; }
+
+  .reactions{ display:flex; gap:6px; margin-top:4px; flex-wrap:wrap; }
+  .reaction-badge{
+    font-size: 11px; background: var(--bg-panel); border:1px solid var(--border);
+    padding: 1px 6px; border-radius: 10px; color: var(--text-dim);
+  }
+  .react-picker{
+    display:none; gap:6px; margin-top:6px; background: var(--bg-panel);
+    border:1px solid var(--border); padding:4px 8px; width:fit-content;
+  }
+  .react-picker.show{ display:flex; }
+  .react-picker span{ cursor:pointer; font-size:15px; }
+  .react-picker span:hover{ transform: scale(1.2); }
+
+  #inputbar{
+    display:flex; border-top: 1px solid var(--border); background: var(--bg-panel);
+    padding: 10px 12px; gap: 8px; align-items:center; flex-wrap:wrap;
+  }
+  #msginput{
+    flex:1; min-width: 100px; background:#000; border:1px solid var(--border); color: var(--text);
+    padding: 10px 12px; font-size:14px; outline:none;
+  }
+  #msginput:focus{ border-color: var(--green-dim); }
+  #sendbtn{
+    background: var(--green); color:#000; border:none; padding: 0 18px;
+    font-weight:700; cursor:pointer; font-size:13px; height:38px;
+  }
+  #sendbtn:hover{ background:#4dff85; }
+  #sendbtn:disabled{ background: var(--border); color: var(--text-dim); cursor:not-allowed; }
+
+  .iconbtn{
+    background:none; border:1px solid var(--border); color: var(--text-dim);
+    padding: 0 12px; font-size:15px; cursor:pointer; height:38px;
+  }
+  .iconbtn:hover{ border-color: var(--green-dim); color: var(--green); }
+  .iconbtn:disabled{ opacity:0.4; cursor:not-allowed; }
+  .iconbtn.active{ border-color: var(--red); color: var(--red); }
+  .iconbtn.recording{ border-color: var(--red); color: var(--red); animation: pulse-rec 1s infinite; }
+  @keyframes pulse-rec{ 0%,100%{opacity:1;} 50%{opacity:.4;} }
+
+  #intro{
+    height:100%; display:none; align-items:center; justify-content:center;
+    padding: 24px; overflow-y:auto;
+  }
+  .warn-sys{ color: var(--red) !important; font-style: normal !important; border-left: 2px solid var(--red); padding-left: 8px; }
+
+  #peerPanel{
+    display:none;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px;
+  }
+  #peerPanel.show{ display:block; }
+  .panel-head{ font-size:10.5px; letter-spacing:1.5px; color: var(--green-dim); margin-bottom:8px; }
+  .panel-note{ font-size:11px; color: var(--text-dim); line-height:1.5; margin-bottom:12px; }
+  .fp-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:6px 0; border-bottom:1px dotted var(--border); font-size:12px;
+  }
+  .fp-row:last-child{ border-bottom:none; }
+  .fp-label{ color: var(--text); }
+  .fp-code{ color: var(--green); letter-spacing:1px; font-weight:600; }
+  #intro .card{ max-width: 460px; }
+  .intro-text{ color: var(--text); font-size: 13px; line-height:1.6; margin-bottom: 4px; }
+  .intro-block{ margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .intro-block.warn{ border-top-color: var(--amber); }
+  .intro-label{ font-size: 10.5px; letter-spacing:1.5px; color: var(--green-dim); margin-bottom: 8px; }
+  .intro-block.warn .intro-label{ color: var(--amber); }
+  #introEnterBtn{ margin-top: 24px; }
+</style>
+</head>
+<body>
+<div id="boot"></div>
+<div id="app">
+
+  <div id="intro">
+    <div class="card">
+      <h1>&gt;_ GHOSTLINE</h1>
+      <p class="intro-text">A free, private chat room for you and a small group. No account, no company behind it, no ads.</p>
+
+      <div class="intro-block">
+        <div class="intro-label">HOW IT WORKS</div>
+        <p class="intro-text">Messages are encrypted right in your browser before they ever leave your device (AES-256, the same standard banks use). The relay server that carries the messages only ever sees scrambled data, never your actual text or photos.</p>
+      </div>
+
+      <div class="intro-block">
+        <div class="intro-label">WHAT YOU NEED</div>
+        <p class="intro-text">A <b>channel name</b> and a <b>keyphrase</b>. Pick your own, then share them with your group through a different app (not here). Everyone who has both can join the same room.</p>
+      </div>
+
+      <div class="intro-block warn">
+        <div class="intro-label">BE REALISTIC ABOUT THIS</div>
+        <p class="intro-text">This is not a replacement for Signal. It's a lightweight, open tool for casual private group chats. Don't use it for anything where your safety depends on it. If you need serious protection, use Signal.</p>
+        <p class="intro-text" style="margin-top:10px;">Also: the relay can't read anything, but it can still see <i>that</i> a channel is active — timing, message sizes, roughly how many people. Encryption hides content, not activity. And anyone who guesses your channel name can flood it with noise (they still can't read or write messages without the keyphrase).</p>
+      </div>
+
+      <button class="primary" id="introEnterBtn" type="button">enter →</button>
+    </div>
+  </div>
+
+  <div id="landing">
+    <div class="card">
+      <h1>&gt;_ GHOSTLINE</h1>
+
+      <label>handle</label>
+      <input type="text" id="nameInput" placeholder="e.g. nb0x" maxlength="20">
+
+      <label>channel</label>
+      <div class="row">
+        <input type="text" id="roomInput" placeholder="e.g. ghost-42-fern" maxlength="40">
+        <button class="genbtn" id="genBtn" type="button">generate</button>
+      </div>
+
+      <label>keyphrase</label>
+      <input type="password" id="passInput" placeholder="min. 6 characters" maxlength="60">
+
+      <button class="primary" id="joinBtn" type="button" disabled>jack in →</button>
+    </div>
+  </div>
+
+  <div id="chat">
+    <div class="topbar">
+      <div class="left">
+        <div class="room">channel: <b id="roomLabel"></b></div>
+        <span class="status" id="statusLabel">connecting...</span>
+        <span class="presence" id="presenceLabel"></span>
+      </div>
+      <div class="btns">
+        <button id="verifyBtn" type="button" title="verify keys">🔑</button>
+        <button id="themeBtn" type="button" title="switch theme">🎨</button>
+        <button id="purgeBtn" type="button" title="clear channel view for everyone">🧹</button>
+        <button class="leave" id="leaveBtn" type="button">leave</button>
+      </div>
+    </div>
+    <div id="peerPanel">
+      <div class="panel-head">KEY FINGERPRINTS</div>
+      <p class="panel-note">Compare these codes with your friends in person or over a call. If someone's code doesn't match what they see on their screen, you are not talking to who you think you are.</p>
+      <div id="peerListBody"></div>
+    </div>
+    <div id="messages"></div>
+    <div id="inputbar">
+      <button id="photobtn" class="iconbtn" type="button" title="send photo">📎</button>
+      <button id="voicebtn" class="iconbtn" type="button" title="record voice message">🎙️</button>
+      <button id="burnbtn" class="iconbtn" type="button" title="burn after reading">🔥</button>
+      <input type="text" id="msginput" placeholder="type a message..." maxlength="500">
+      <button id="sendbtn" type="button">send</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  let ROOM = null;
+  let NAME = null;
+  let TOPIC = null;
+  let CRYPTO_KEY = null;
+  let seenMids = new Set();
+  let evtSource = null;
+  let seenIds = new Set();
+  let mySentAttachmentIds = new Set();
+  let burnMode = false;
+  let presenceTimer = null;
+  let presenceMap = new Map(); // name -> lastSeen ms
+  let msgElementsByMid = new Map();
+  let recording = false;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recordingTimer = null;
+  const MAX_RECORD_MS = 2 * 60 * 1000; // auto-stop so recordings can't grow past relay limits unnoticed
+  const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+
+  const nameInput = document.getElementById('nameInput');
+  const roomInput = document.getElementById('roomInput');
+  const passInput = document.getElementById('passInput');
+  const joinBtn = document.getElementById('joinBtn');
+  const genBtn = document.getElementById('genBtn');
+  const landing = document.getElementById('landing');
+  const chatEl = document.getElementById('chat');
+  const roomLabel = document.getElementById('roomLabel');
+  const statusLabel = document.getElementById('statusLabel');
+  const presenceLabel = document.getElementById('presenceLabel');
+  const messagesEl = document.getElementById('messages');
+  const msginput = document.getElementById('msginput');
+  const sendbtn = document.getElementById('sendbtn');
+  const leaveBtn = document.getElementById('leaveBtn');
+  const photobtn = document.getElementById('photobtn');
+  const voicebtn = document.getElementById('voicebtn');
+  const burnbtn = document.getElementById('burnbtn');
+  const themeBtn = document.getElementById('themeBtn');
+  const purgeBtn = document.getElementById('purgeBtn');
+
+  const words = ["ghost","fox","lamp","fern","fog","pebble","tin","spark","ash","moss"];
+  function genCode(){
+    const w = words[Math.floor(Math.random()*words.length)];
+    const n = Math.floor(Math.random()*90+10);
+    const w2 = words[Math.floor(Math.random()*words.length)];
+    return `${w}-${n}-${w2}`;
+  }
+  genBtn.addEventListener('click', ()=>{
+    roomInput.value = genCode();
+    checkReady();
+  });
+
+  function checkReady(){
+    joinBtn.disabled = !(nameInput.value.trim() && roomInput.value.trim() && passInput.value.trim().length >= 6);
+  }
+  nameInput.addEventListener('input', checkReady);
+  roomInput.addEventListener('input', checkReady);
+  passInput.addEventListener('input', checkReady);
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function genMid(){
+    return crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random());
+  }
+
+  function topicFromRoom(room){
+    const clean = room.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
+    return 'ghostline-e2e-' + clean;
+  }
+
+  // ---- crypto: AES-GCM via native Web Crypto API, key from passphrase (PBKDF2) ----
+  function bufToB64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+  function b64ToBuf(b64){
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+  }
+  // Known tradeoff: the salt is derived from the channel name rather than being
+  // random, because every peer must independently derive the *same* key from the
+  // shared keyphrase without a server to coordinate. A random salt would break
+  // that. The cost is that the salt is predictable, so an attacker who knows the
+  // channel name could precompute against common passphrases. The iteration
+  // count is the main defence against that, so it's set to current OWASP
+  // guidance for PBKDF2-SHA256 (600k) rather than the older 100k.
+  //
+  // This key only ever protects the handshake and low-value control messages
+  // (presence, reactions). Message and attachment content is protected by the
+  // per-message envelope keys instead, which is why a leaked keyphrase does not
+  // retroactively expose past content.
+  async function deriveKey(passphrase, saltStr){
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: enc.encode('ghostline-v1|' + saltStr), iterations: 600000, hash: 'SHA-256' },
+      keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+  }
+  async function encryptText(plainText, key){
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
+    return bufToB64(iv) + '.' + bufToB64(ciphertext);
+  }
+  async function decryptText(payload, key){
+    const [ivB64, ctB64] = payload.split('.');
+    if(!ivB64 || !ctB64) throw new Error('malformed payload');
+    const iv = new Uint8Array(b64ToBuf(ivB64));
+    const ctBuf = b64ToBuf(ctB64);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ctBuf);
+    return new TextDecoder().decode(plainBuf);
+  }
+
+  // ---- forward secrecy layer ----
+  // AUTH_KEY (from the shared keyphrase) only ever encrypts the key-exchange
+  // handshake, never message content. Actual message keys come from a fresh
+  // ECDH keypair generated for this session and never leave the device — so
+  // even if the keyphrase leaks later, past messages can't be decrypted
+  // retroactively. New joiners can't decrypt messages sent before they
+  // arrived — that's expected, it's the same property, not a bug.
+  let MY_KEYPAIR = null;
+  let MY_PUB_RAW_B64 = null;
+  let MY_FP = null;
+  let PEER_KEYS = new Map(); // fingerprint -> { aesKey, name }
+
+  async function fingerprintOf(pubRawB64){
+    const digest = await crypto.subtle.digest('SHA-256', b64ToBuf(pubRawB64));
+    return bufToB64(digest).replace(/[+/=]/g, '').slice(0, 12);
+  }
+
+  async function generateSessionKeypair(){
+    MY_KEYPAIR = await crypto.subtle.generateKey(
+      // deriveBits is required as well as deriveKey: we no longer hand the raw
+      // ECDH output straight to AES-GCM, we pull the bits out and run them
+      // through HKDF first (see derivePairKey).
+      { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']
+    );
+    const rawPub = await crypto.subtle.exportKey('raw', MY_KEYPAIR.publicKey);
+    MY_PUB_RAW_B64 = bufToB64(rawPub);
+    MY_FP = await fingerprintOf(MY_PUB_RAW_B64);
+  }
+
+  // The raw output of ECDH is the x-coordinate of a curve point. It is secret,
+  // but it is not uniformly random: it has algebraic structure and bias, so it
+  // is not safe to use directly as a symmetric key. WebCrypto will happily let
+  // you do exactly that via deriveKey(ECDH -> AES-GCM), which is a well-known
+  // footgun. Instead we take the bits and run them through HKDF, which is what
+  // the shared secret is supposed to be fed into.
+  //
+  // The channel and both fingerprints are bound into the derivation, in a fixed
+  // order so both sides compute the same value. That domain-separates the key:
+  // the same two people in a different channel get a different key.
+  async function derivePairKey(peerPubKey, peerFp){
+    const enc = new TextEncoder();
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: peerPubKey }, MY_KEYPAIR.privateKey, 256
+    );
+    const hkdfMaterial = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+    const pair = [MY_FP, peerFp].sort().join('|');
+    return crypto.subtle.deriveKey(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: enc.encode('ghostline-v1|' + TOPIC),
+        info: enc.encode('pairwise|' + pair)
+      },
+      hkdfMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function addPeer(pubRawB64, name){
+    const fp = await fingerprintOf(pubRawB64);
+    if(fp === MY_FP) return false;
+
+    // A peer's name is bound to their key on first sight. If a later 'hello'
+    // arrives with the same name but a different key, or the same key claiming
+    // a different name, treat it as suspicious rather than silently accepting:
+    // that's what an impersonation attempt inside the channel looks like.
+    const existing = PEER_KEYS.get(fp);
+    if(existing){
+      if(existing.name !== name){
+        flagSuspicious(`key ${fp} tried to change its handle from "${existing.name}" to "${name}"`);
+      }
+      return false;
+    }
+    for(const [otherFp, peer] of PEER_KEYS){
+      if(peer.name === name){
+        flagSuspicious(`two different keys are claiming the handle "${name}" (${otherFp} and ${fp}). Verify fingerprints before trusting either`);
+      }
+    }
+
+    const peerPubKey = await crypto.subtle.importKey(
+      'raw', b64ToBuf(pubRawB64), { name: 'ECDH', namedCurve: 'P-256' }, false, []
+    );
+    const aesKey = await derivePairKey(peerPubKey, fp);
+    PEER_KEYS.set(fp, { aesKey, name });
+    updatePeerListUI();
+    updateSendability();
+
+    // Keys are trusted on first sight (there is no server to vouch for
+    // anyone), so make that moment visible instead of silent: the fingerprint
+    // panel only protects people who actually open it.
+    const sys = document.createElement('div');
+    sys.className = 'sys';
+    sys.textContent = `// ${name} connected · key ${fp} — tap 🔑 and compare codes over a call or in person if this chat matters`;
+    messagesEl.appendChild(sys);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    return true; // caller uses this to reply with its own hello exactly once
+  }
+
+  async function sendHello(){
+    if(!MY_PUB_RAW_B64 || !CRYPTO_KEY) return;
+    const hello = JSON.stringify({ type: 'hello', from: NAME, pub: MY_PUB_RAW_B64 });
+    try{
+      await fetch(`https://ntfy.sh/${TOPIC}`, { method: 'POST', body: await encryptText(hello, CRYPTO_KEY) });
+    } catch(e){ console.log('hello broadcast failed', e); }
+  }
+
+  // Content is only readable by peers we've already exchanged keys with, so if
+  // nobody has handshaked yet, anything we send is undecryptable by everyone
+  // forever, including people who join later. Rather than let that happen
+  // silently, block sending until at least one peer is known.
+  function updateSendability(){
+    const ready = PEER_KEYS.size > 0;
+    if(sendbtn) sendbtn.disabled = !ready;
+    if(photobtn) photobtn.disabled = !ready;
+    if(voicebtn) voicebtn.disabled = !ready;
+    if(msginput){
+      msginput.disabled = !ready;
+      msginput.placeholder = ready
+        ? 'type a message...'
+        : 'waiting for someone else to join this channel...';
+    }
+  }
+
+  function flagSuspicious(reason){
+    const div = document.createElement('div');
+    div.className = 'sys warn-sys';
+    div.textContent = `// ⚠ WARNING: ${reason}`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // pad plaintext to the nearest 64-byte bucket so ciphertext length
+  // doesn't reveal the exact message length
+  function padText(text){
+    const bytes = new TextEncoder().encode(text);
+    const bucket = 64;
+    const targetLen = Math.ceil((bytes.length + 2) / bucket) * bucket;
+    const out = new Uint8Array(targetLen);
+    out[0] = (bytes.length >> 8) & 0xff;
+    out[1] = bytes.length & 0xff;
+    out.set(bytes, 2);
+    return out;
+  }
+  function unpadText(bytes){
+    const len = (bytes[0] << 8) | bytes[1];
+    return new TextDecoder().decode(bytes.slice(2, 2 + len));
+  }
+
+  // envelope-encrypt a chat message: fresh random key per message, wrapped
+  // individually for each known peer via their ECDH-derived key
+  async function encryptEnvelope(text){
+    const msgKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const padded = padText(text);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, padded);
+    const rawMsgKey = await crypto.subtle.exportKey('raw', msgKey);
+
+    const wraps = [];
+    for(const [fp, peer] of PEER_KEYS){
+      const wivB = crypto.getRandomValues(new Uint8Array(12));
+      const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wivB }, peer.aesKey, rawMsgKey);
+      wraps.push({ fp, iv: bufToB64(wivB), key: bufToB64(wrapped) });
+    }
+    // sfp is a *hint*, not proof: it tells the receiver which pairwise key to
+    // try first instead of looping through all of them. Actual sender identity
+    // still comes only from which pairwise key successfully unwraps.
+    return { iv: bufToB64(iv), ct: bufToB64(ciphertext), wraps, sfp: MY_FP };
+  }
+
+  async function decryptEnvelope(envelope){
+    const mine = envelope.wraps.find(w => w.fp === MY_FP);
+    if(!mine) throw new Error('no key for us yet (sender didn\'t have our handshake)');
+    // The wrap is per-recipient, so identifying the sender means finding which
+    // pairwise key unwraps it. envelope.sfp (if present) is an unauthenticated
+    // hint for which key to try first; lying about it just wastes the liar one
+    // decryption attempt, because identity is decided by what actually unwraps.
+    const tryOrder = [];
+    if(envelope.sfp && PEER_KEYS.has(envelope.sfp)) tryOrder.push(envelope.sfp);
+    for(const fp of PEER_KEYS.keys()){
+      if(fp !== envelope.sfp) tryOrder.push(fp);
+    }
+    for(const fp of tryOrder){
+      const peer = PEER_KEYS.get(fp);
+      try{
+        const rawMsgKey = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(mine.iv)) }, peer.aesKey, b64ToBuf(mine.key)
+        );
+        const msgKey = await crypto.subtle.importKey('raw', rawMsgKey, { name: 'AES-GCM' }, false, ['decrypt']);
+        const plainBuf = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(envelope.iv)) }, msgKey, b64ToBuf(envelope.ct)
+        );
+        return { text: unpadText(new Uint8Array(plainBuf)), fromFp: fp };
+      } catch(e){ /* try next peer key */ }
+    }
+    throw new Error('could not decrypt envelope');
+  }
+
+  function updatePeerListUI(){
+    const el = document.getElementById('peerListBody');
+    if(!el) return;
+    if(PEER_KEYS.size === 0){
+      el.innerHTML = '<div class="sys">// no one else has connected yet</div>';
+      return;
+    }
+    let html = `<div class="fp-row"><span class="fp-label">you</span><span class="fp-code">${MY_FP}</span></div>`;
+    for(const [fp, peer] of PEER_KEYS){
+      html += `<div class="fp-row"><span class="fp-label">${escapeHtml(peer.name)}</span><span class="fp-code">${fp}</span></div>`;
+    }
+    el.innerHTML = html;
+  }
+  // Attachments (photos, voice notes) get the same envelope treatment as text:
+  // a fresh random key per file, wrapped individually for each peer via their
+  // ECDH-derived key. Previously these were encrypted directly under the
+  // keyphrase-derived key, which meant photos and voice — arguably the most
+  // sensitive content here — had no forward secrecy at all while text did.
+  //
+  // Wire format:
+  //   [4-byte big-endian header length][header JSON][12-byte iv][ciphertext]
+  // where header JSON = { wraps: [{ fp, iv, key }, ...] }
+  async function encryptBinary(metaObj, fileBuf){
+    const enc = new TextEncoder();
+    const metaBytes = enc.encode(JSON.stringify(metaObj));
+    const metaLen = new Uint8Array(4);
+    new DataView(metaLen.buffer).setUint32(0, metaBytes.length, false);
+    const combined = new Uint8Array(4 + metaBytes.length + fileBuf.byteLength);
+    combined.set(metaLen, 0);
+    combined.set(metaBytes, 4);
+    combined.set(new Uint8Array(fileBuf), 4 + metaBytes.length);
+
+    const fileKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, fileKey, combined);
+    const rawFileKey = await crypto.subtle.exportKey('raw', fileKey);
+
+    const wraps = [];
+    for(const [fp, peer] of PEER_KEYS){
+      const wiv = crypto.getRandomValues(new Uint8Array(12));
+      const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wiv }, peer.aesKey, rawFileKey);
+      wraps.push({ fp, iv: bufToB64(wiv), key: bufToB64(wrapped) });
+    }
+    const headerBytes = enc.encode(JSON.stringify({ wraps, sfp: MY_FP })); // sfp = hint only, see decryptEnvelope
+    const headerLen = new Uint8Array(4);
+    new DataView(headerLen.buffer).setUint32(0, headerBytes.length, false);
+
+    const out = new Uint8Array(4 + headerBytes.length + 12 + ciphertext.byteLength);
+    out.set(headerLen, 0);
+    out.set(headerBytes, 4);
+    out.set(iv, 4 + headerBytes.length);
+    out.set(new Uint8Array(ciphertext), 4 + headerBytes.length + 12);
+    return out;
+  }
+
+  async function decryptBinary(fullBuf){
+    const bytes = new Uint8Array(fullBuf);
+    const headerLen = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, false);
+    const header = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + headerLen)));
+    const iv = bytes.slice(4 + headerLen, 4 + headerLen + 12);
+    const ct = bytes.slice(4 + headerLen + 12);
+
+    const mine = (header.wraps || []).find(w => w.fp === MY_FP);
+    if(!mine) throw new Error('no key for us on this attachment');
+
+    const tryOrder = [];
+    if(header.sfp && PEER_KEYS.has(header.sfp)) tryOrder.push(header.sfp);
+    for(const fp of PEER_KEYS.keys()){
+      if(fp !== header.sfp) tryOrder.push(fp);
+    }
+    for(const fp of tryOrder){
+      const peer = PEER_KEYS.get(fp);
+      try{
+        const rawFileKey = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(mine.iv)) }, peer.aesKey, b64ToBuf(mine.key)
+        );
+        const fileKey = await crypto.subtle.importKey('raw', rawFileKey, { name: 'AES-GCM' }, false, ['decrypt']);
+        const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, fileKey, ct);
+        const plain = new Uint8Array(plainBuf);
+        const metaLen = new DataView(plain.buffer, plain.byteOffset, 4).getUint32(0, false);
+        const meta = JSON.parse(new TextDecoder().decode(plain.slice(4, 4 + metaLen)));
+        const fileBytes = plain.slice(4 + metaLen);
+        return { meta, fileBytes, fromFp: fp };
+      } catch(e){ /* try next peer key */ }
+    }
+    throw new Error('could not decrypt attachment');
+  }
+
+  // ---- rendering ----
+  function scrollToBottom(){ messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+  function clearEmptyState(){
+    const empty = messagesEl.querySelector('.sys');
+    if(empty) empty.remove();
+  }
+
+  function attachReactionUI(msgDiv, mid){
+    const txtOrImg = msgDiv.querySelector('.txt, .img-wrap');
+    const picker = document.createElement('div');
+    picker.className = 'react-picker';
+    ['👍','🔥','💀','😂','❤️'].forEach(emo=>{
+      const span = document.createElement('span');
+      span.textContent = emo;
+      span.addEventListener('click', ()=>{ sendReaction(mid, emo); picker.classList.remove('show'); });
+      picker.appendChild(span);
+    });
+    const reactionsRow = document.createElement('div');
+    reactionsRow.className = 'reactions';
+    msgDiv.querySelector('.body').appendChild(reactionsRow);
+    msgDiv.querySelector('.body').appendChild(picker);
+    if(txtOrImg){
+      txtOrImg.addEventListener('click', ()=> picker.classList.toggle('show'));
+    }
+    msgDiv._reactionsRow = reactionsRow;
+  }
+
+  function addMessage(from, text, ts, mid, burn){
+    clearEmptyState();
+    const div = document.createElement('div');
+    div.className = 'msg' + (from === NAME ? ' me' : '');
+    const time = new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <span class="txt">${escapeHtml(text)}</span>${burn ? '<span class="burn-tag">🔥 burns in 20s</span>' : ''}</div>`;
+    messagesEl.appendChild(div);
+    if(mid){ msgElementsByMid.set(mid, div); attachReactionUI(div, mid); }
+    scrollToBottom();
+    if(burn) scheduleBurn(div, mid);
+  }
+
+  // Removing a message node has to release anything hanging off it, otherwise
+  // a burned photo is gone from the screen but its decrypted bytes are still
+  // held in memory behind a live blob URL, and msgElementsByMid keeps growing.
+  function destroyMessage(div, mid){
+    releaseObjectUrlsIn(div);
+    if(mid) msgElementsByMid.delete(mid);
+    div.remove();
+  }
+  function scheduleBurn(div, mid){
+    setTimeout(()=>{
+      div.classList.add('fading');
+      setTimeout(()=> destroyMessage(div, mid), 800);
+    }, 20000);
+  }
+
+  function addImageMessage(from, ts, mid, burn){
+    clearEmptyState();
+    const div = document.createElement('div');
+    div.className = 'msg' + (from === NAME ? ' me' : '');
+    const time = new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    div.innerHTML = `<div class="ts">${time}</div><div class="body"><span class="who">${escapeHtml(from)}:</span> <div class="img-wrap"><span class="img-loading">// decrypting...</span></div>${burn ? '<span class="burn-tag">🔥 burns in 20s</span>' : ''}</div>`;
+    messagesEl.appendChild(div);
+    scrollToBottom();
+    if(mid){ msgElementsByMid.set(mid, div); attachReactionUI(div, mid); }
+    // Burn used to be text-only: attachments carried no burn flag at all, so
+    // turning on burn mode and sending a photo left the photo sitting there
+    // forever while the UI implied it would self-destruct.
+    if(burn) scheduleBurn(div, mid);
+    return div.querySelector('.img-wrap');
+  }
+
+  function showEmptyState(){
+    messagesEl.innerHTML = '<div class="sys">// room is empty. send the first message.</div>';
+    msgElementsByMid.clear();
+  }
+
+  function sendReaction(targetMid, emoji){
+    const payload = JSON.stringify({ type:'reaction', from: NAME, targetMid, emoji, mid: genMid() });
+    encryptText(payload, CRYPTO_KEY).then(encrypted=>{
+      fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
+    });
+  }
+
+  // meta.mime arrives over the wire from another participant, so it is not
+  // trustworthy. A blob created with an attacker-chosen type sits on our own
+  // origin, and if that type were something like text/html, opening the blob
+  // URL directly would render attacker markup as us. Only ever hand Blob() a
+  // type we picked ourselves.
+  const IMAGE_MIME_OK = ['image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif'];
+  const AUDIO_MIME_OK = ['audio/webm','audio/mp4','audio/mpeg','audio/ogg','audio/wav'];
+  function safeMime(claimed, allowed, fallback){
+    const base = String(claimed || '').split(';')[0].trim().toLowerCase();
+    return allowed.includes(base) ? base : fallback;
+  }
+
+  // Every object URL we mint is tracked so it can be released. Without this
+  // each photo and voice note stays in memory for the whole session, which on
+  // a phone eventually kills the tab.
+  const liveObjectUrls = new Set();
+  function makeObjectUrl(blob){
+    const url = URL.createObjectURL(blob);
+    liveObjectUrls.add(url);
+    return url;
+  }
+  function releaseObjectUrlsIn(el){
+    if(!el) return;
+    el.querySelectorAll('img[src^="blob:"], audio[src^="blob:"]').forEach(node=>{
+      const u = node.getAttribute('src');
+      if(liveObjectUrls.has(u)){ URL.revokeObjectURL(u); liveObjectUrls.delete(u); }
+    });
+  }
+  function releaseAllObjectUrls(){
+    for(const u of liveObjectUrls) URL.revokeObjectURL(u);
+    liveObjectUrls.clear();
+  }
+
+  function renderReaction(targetMid, emoji){
+    const el = msgElementsByMid.get(targetMid);
+    if(!el || !el._reactionsRow) return;
+    const badge = document.createElement('span');
+    badge.className = 'reaction-badge';
+    badge.textContent = String(emoji || '').slice(0, 8); // a peer controls this string; don't let it be a wall of text
+    el._reactionsRow.appendChild(badge);
+  }
+
+  function updatePresenceLabel(){
+    const now = Date.now();
+    const online = [...presenceMap.entries()].filter(([n,t]) => now - t < 40000).map(([n]) => n);
+    presenceLabel.innerHTML = online.length ? `online: <b>${online.map(escapeHtml).join(', ')}</b>` : '';
+  }
+
+  function sendPresence(){
+    const payload = JSON.stringify({ type:'presence', from: NAME });
+    encryptText(payload, CRYPTO_KEY).then(encrypted=>{
+      fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
+    });
+  }
+
+  async function handleIncoming(data){
+    if(!data || data.event !== 'message') return;
+    if(seenIds.has(data.id)) return;
+    seenIds.add(data.id);
+
+    if(data.attachment && data.attachment.url){
+      try{
+        const res = await fetch(data.attachment.url);
+        const buf = await res.arrayBuffer();
+        const { meta, fileBytes, fromFp } = await decryptBinary(buf);
+        if(meta.mid && mySentAttachmentIds.has(meta.mid)) return;
+
+        // same replay + identity checks that text messages get
+        if(meta.mid && seenMids.has(meta.mid)) return;
+        if(meta.mid) seenMids.add(meta.mid);
+
+        const realPeer = PEER_KEYS.get(fromFp);
+        const claimedName = meta.from || 'unknown';
+        if(realPeer && realPeer.name !== claimedName){
+          flagSuspicious(`an attachment claimed to be from "${claimedName}" but was encrypted by ${realPeer.name}'s key (${fromFp})`);
+        }
+        const trustedName = realPeer ? realPeer.name : claimedName;
+
+        if(meta.type === 'audio'){
+          const wrap = addImageMessage(trustedName, (data.time || Date.now()/1000) * 1000, meta.mid, !!meta.burn);
+          const blob = new Blob([fileBytes], { type: safeMime(meta.mime, AUDIO_MIME_OK, 'audio/webm') });
+          const url = makeObjectUrl(blob);
+          wrap.innerHTML = `<audio controls src="${url}"></audio>`;
+        } else {
+          const wrap = addImageMessage(trustedName, (data.time || Date.now()/1000) * 1000, meta.mid, !!meta.burn);
+          const blob = new Blob([fileBytes], { type: safeMime(meta.mime, IMAGE_MIME_OK, 'image/jpeg') });
+          const url = makeObjectUrl(blob);
+          wrap.innerHTML = `<img src="${url}" alt="photo">`;
+        }
+      } catch(e){
+        console.log('could not decrypt an attachment (no key for us, or corrupt)');
+      }
+      return;
+    }
+
+    try{
+      const decrypted = await decryptText(data.message, CRYPTO_KEY);
+      const parsed = JSON.parse(decrypted);
+      const ts = (data.time || Date.now()/1000) * 1000;
+
+      if(parsed.type === 'presence'){
+        presenceMap.set(parsed.from, Date.now());
+        updatePresenceLabel();
+        return;
+      }
+      if(parsed.type === 'reaction'){
+        renderReaction(parsed.targetMid, parsed.emoji);
+        return;
+      }
+      if(parsed.type === 'purge'){
+        releaseObjectUrlsIn(messagesEl);
+        messagesEl.innerHTML = '';
+        msgElementsByMid.clear();
+        const sys = document.createElement('div');
+        sys.className = 'sys';
+        sys.textContent = `// channel view cleared by ${parsed.from || 'someone'} (message history on the relay still expires naturally)`;
+        messagesEl.appendChild(sys);
+        return;
+      }
+      if(parsed.type === 'hello'){
+        // Don't rely on name matching to spot our own echo: two people can pick
+        // the same handle. Compare the key itself.
+        if(parsed.pub === MY_PUB_RAW_B64) return;
+        const isNew = await addPeer(parsed.pub, parsed.from);
+        // Reply once, and only to peers we hadn't seen before. Without this,
+        // whoever joined first never learns the newcomer's key unless their own
+        // original hello happens to still be in the relay's backlog window, and
+        // messages silently fail to decrypt in one direction. Replying only on
+        // 'isNew' means the exchange terminates instead of looping.
+        if(isNew) sendHello();
+        return;
+      }
+      if(parsed.type === 'text'){
+        // Our own echo is caught by mid (added to seenMids on send), NOT by
+        // comparing display names: two people can legitimately pick the same
+        // handle, and a name check would silently drop the other person's
+        // messages. (Our own echo also can't decrypt anyway — we don't wrap
+        // the message key for ourselves — but the mid check makes the skip
+        // explicit and free.)
+        if(parsed.mid && seenMids.has(parsed.mid)){
+          return; // replay, or our own echo
+        }
+        try{
+          const { text, fromFp } = await decryptEnvelope(parsed.envelope);
+
+          // The envelope tells us which key actually encrypted this. If the
+          // display name in the payload doesn't match the name bound to that
+          // key, someone is putting another person's name on their message.
+          const realPeer = PEER_KEYS.get(fromFp);
+          const claimedName = parsed.from || 'unknown';
+          if(realPeer && realPeer.name !== claimedName){
+            flagSuspicious(`a message claimed to be from "${claimedName}" but was encrypted with ${realPeer.name}'s key (${fromFp}). Showing it under the real key owner`);
+          }
+          const trustedName = realPeer ? realPeer.name : claimedName;
+
+          if(parsed.mid) seenMids.add(parsed.mid);
+
+          addMessage(trustedName, text, ts, parsed.mid, parsed.burn);
+        } catch(e){
+          // we don't have keys for this sender yet — expected if they joined
+          // before us, or we're still exchanging handshakes
+          console.log('no key yet for this message, skipping');
+        }
+        return;
+      }
+    } catch(e){
+      console.log('could not decrypt a message (wrong passphrase?)');
+    }
+  }
+
+  async function loadBacklog(){
+    try{
+      const res = await fetch(`https://ntfy.sh/${TOPIC}/json?poll=1&since=all`);
+      const txt = await res.text();
+      const lines = txt.trim().split('\n').filter(Boolean);
+      if(lines.length === 0){ showEmptyState(); return; }
+      for(const line of lines){
+        try{ await handleIncoming(JSON.parse(line)); } catch(e){}
+      }
+      if(messagesEl.children.length === 0) showEmptyState();
+    } catch(e){
+      console.error('backlog load failed', e);
+      showEmptyState();
+    }
+  }
+
+  function connectLive(){
+    statusLabel.textContent = 'connecting...';
+    statusLabel.className = 'status';
+    try{
+      evtSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse`);
+      evtSource.onopen = ()=>{
+        statusLabel.textContent = 'live · encrypted';
+        statusLabel.className = 'status live';
+      };
+      evtSource.onmessage = (e)=>{
+        try{ const data = JSON.parse(e.data); handleIncoming(data); } catch(err){}
+      };
+      evtSource.onerror = ()=>{
+        statusLabel.textContent = 'connection unstable...';
+        statusLabel.className = 'status down';
+      };
+    } catch(e){
+      statusLabel.textContent = 'offline';
+      statusLabel.className = 'status down';
+    }
+  }
+
+  async function joinRoom(){
+    NAME = nameInput.value.trim().slice(0,20);
+    ROOM = roomInput.value.trim();
+    TOPIC = topicFromRoom(ROOM);
+    roomLabel.textContent = ROOM;
+
+    joinBtn.disabled = true;
+    joinBtn.textContent = 'generating key...';
+    CRYPTO_KEY = await deriveKey(passInput.value, TOPIC);
+    await generateSessionKeypair();
+    joinBtn.textContent = 'jack in →';
+
+    landing.style.display = 'none';
+    chatEl.classList.add('show');
+    messagesEl.innerHTML = '<div class="sys">// loading history...</div>';
+    await loadBacklog();
+    connectLive();
+
+    // Announce our public key so others can derive a shared key with us.
+    sendHello();
+    updatePeerListUI();
+    updateSendability();
+
+    presenceMap.set(NAME, Date.now());
+    sendPresence();
+    presenceTimer = setInterval(()=>{ sendPresence(); updatePresenceLabel(); }, 15000);
+
+    msginput.focus();
+  }
+  joinBtn.addEventListener('click', joinRoom);
+
+  leaveBtn.addEventListener('click', ()=>{
+    if(recording && mediaRecorder){
+      // drop, don't send: the session is over
+      mediaRecorder.onstop = ()=>{ mediaRecorder.stream.getTracks().forEach(t=>t.stop()); };
+      stopRecording();
+    }
+    if(evtSource) evtSource.close();
+    if(presenceTimer) clearInterval(presenceTimer);
+    chatEl.classList.remove('show');
+    landing.style.display = 'flex';
+    releaseAllObjectUrls();
+    messagesEl.innerHTML = '';
+    seenIds = new Set();
+    seenMids = new Set();
+    PEER_KEYS.clear();
+    MY_KEYPAIR = null;
+    MY_PUB_RAW_B64 = null;
+    MY_FP = null;
+    msgElementsByMid.clear();
+    presenceMap.clear();
+    CRYPTO_KEY = null;
+    checkReady();
+  });
+
+  async function sendMessage(){
+    const text = msginput.value.trim();
+    if(!text) return;
+    sendbtn.disabled = true;
+    try{
+      const mid = genMid();
+      seenMids.add(mid); // so our own echo from the relay is skipped by id, not by name
+      const envelope = await encryptEnvelope(text);
+      const payload = JSON.stringify({ type:'text', from: NAME, mid, burn: burnMode, envelope });
+      const encrypted = await encryptText(payload, CRYPTO_KEY);
+      const res = await fetch(`https://ntfy.sh/${TOPIC}`, { method: 'POST', body: encrypted });
+      try{
+        const pub = await res.json();
+        if(pub && pub.id) seenIds.add(pub.id); // skip our own SSE echo entirely
+      } catch(e){ /* non-fatal: mid check catches the echo anyway */ }
+      msginput.value = '';
+      // show it locally right away — we don't wrap a copy for ourselves,
+      // so it won't come back to us over the wire
+      addMessage(NAME, text, Date.now(), mid, burnMode);
+    } catch(e){
+      console.error('send failed', e);
+      alert('Message could not be sent. Check your connection.');
+    } finally {
+      updateSendability();
+      msginput.focus();
+    }
+  }
+  document.getElementById('verifyBtn').addEventListener('click', ()=>{
+    const panel = document.getElementById('peerPanel');
+    panel.classList.toggle('show');
+    if(panel.classList.contains('show')) updatePeerListUI();
+  });
+
+  sendbtn.addEventListener('click', sendMessage);
+  msginput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') sendMessage();
+  });
+
+  let burnNoteShown = false;
+  burnbtn.addEventListener('click', ()=>{
+    burnMode = !burnMode;
+    burnbtn.classList.toggle('active', burnMode);
+    burnbtn.title = burnMode ? 'burn mode ON: next messages disappear from screens after 20s' : 'burn after reading';
+    // Be honest about what burn is: a courtesy, not a guarantee. It removes
+    // the message from the screens of clients that play along. It cannot stop
+    // screenshots, modified clients, or the relay holding ciphertext until it
+    // expires naturally.
+    if(burnMode && !burnNoteShown){
+      burnNoteShown = true;
+      const sys = document.createElement('div');
+      sys.className = 'sys';
+      sys.textContent = '// burn mode: messages fade from everyone\'s screen after 20s. This is a courtesy, not a guarantee — it can\'t prevent screenshots, and the encrypted copy stays on the relay until it expires (~12h).';
+      messagesEl.appendChild(sys);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  });
+
+  themeBtn.addEventListener('click', ()=>{
+    if(document.body.classList.contains('theme-amber')){
+      document.body.classList.remove('theme-amber');
+      document.body.classList.add('theme-blue');
+    } else if(document.body.classList.contains('theme-blue')){
+      document.body.classList.remove('theme-blue');
+    } else {
+      document.body.classList.add('theme-amber');
+    }
+  });
+
+  purgeBtn.addEventListener('click', ()=>{
+    if(!confirm('Clear the channel view for everyone currently online? (Does not affect relay retention.)')) return;
+    const payload = JSON.stringify({ type:'purge', from: NAME });
+    encryptText(payload, CRYPTO_KEY).then(encrypted=>{
+      fetch(`https://ntfy.sh/${TOPIC}`, { method:'POST', body: encrypted }).catch(()=>{});
+    });
+  });
+
+  // ---- photo ----
+  photobtn.addEventListener('click', ()=>{
+    const freshInput = document.createElement('input');
+    freshInput.type = 'file';
+    freshInput.accept = 'image/*';
+    freshInput.style.cssText = 'position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none;';
+    document.body.appendChild(freshInput);
+    freshInput.addEventListener('change', ()=>{
+      handlePhotoFile(freshInput.files[0]);
+      freshInput.remove();
+    });
+    freshInput.click();
+  });
+
+  async function handlePhotoFile(file){
+    if(!file) return;
+    if(file.size > MAX_ATTACHMENT_BYTES){
+      alert('Image is larger than 12 MB, that\'s too big. Please pick a smaller image.');
+      return;
+    }
+    photobtn.disabled = true;
+    let localWrap = null;
+    try{
+      const mid = genMid();
+      localWrap = addImageMessage(NAME, Date.now(), mid, burnMode);
+      const fileBuf = await file.arrayBuffer();
+      mySentAttachmentIds.add(mid);
+      const meta = { type:'photo', from: NAME, mime: file.type || 'image/jpeg', mid, burn: burnMode };
+
+      const localUrl = makeObjectUrl(new Blob([fileBuf], { type: meta.mime }));
+      localWrap.innerHTML = `<img src="${localUrl}" alt="photo">`;
+      localWrap.closest('.msg').classList.add('me');
+
+      const encrypted = await encryptBinary(meta, fileBuf);
+      const res = await fetch(`https://ntfy.sh/${TOPIC}`, {
+        method: 'PUT', headers: { 'X-Filename': 'photo.enc' }, body: encrypted
+      });
+      if(!res.ok){
+        const errText = await res.text().catch(()=> '');
+        throw new Error(`Server responded with ${res.status}: ${errText || res.statusText}`);
+      }
+      // ntfy echoes the published message back over SSE. We can't decrypt our
+      // own attachments (no self-wrap), so without this we'd re-download the
+      // whole file just to fail. Record the relay's id and skip the echo cold.
+      try{
+        const pub = await res.json();
+        if(pub && pub.id) seenIds.add(pub.id);
+      } catch(e){ /* non-fatal: echo just gets skipped later via mySentAttachmentIds path */ }
+    } catch(e){
+      console.error('photo send failed', e);
+      if(localWrap){ const m = localWrap.closest('.msg'); if(m) m.remove(); }
+      alert('Photo could not be sent: ' + (e && e.message ? e.message : e));
+    } finally {
+      updateSendability();
+    }
+  }
+
+  // ---- voice ----
+  voicebtn.addEventListener('click', async ()=>{
+    if(!recording){
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e)=>{ if(e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = async ()=>{
+          stream.getTracks().forEach(t => t.stop());
+          const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+          await sendVoiceBlob(blob);
+        };
+        mediaRecorder.start();
+        recording = true;
+        voicebtn.classList.add('recording');
+        voicebtn.title = 'tap to stop and send (auto-stops after 2 min)';
+        recordingTimer = setTimeout(()=>{
+          if(recording){ stopRecording(); }
+        }, MAX_RECORD_MS);
+      } catch(e){
+        alert('Could not access microphone: ' + (e && e.message ? e.message : e));
+      }
+    } else {
+      stopRecording();
+    }
+  });
+
+  function stopRecording(){
+    if(recordingTimer){ clearTimeout(recordingTimer); recordingTimer = null; }
+    if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    recording = false;
+    voicebtn.classList.remove('recording');
+    voicebtn.title = 'record voice message';
+  }
+
+  async function sendVoiceBlob(blob){
+    if(blob.size > MAX_ATTACHMENT_BYTES){
+      alert('Recording is too large to send (over 12 MB). Try a shorter one.');
+      updateSendability();
+      return;
+    }
+    voicebtn.disabled = true;
+    let localWrap = null;
+    try{
+      const mid = genMid();
+      const fileBuf = await blob.arrayBuffer();
+      mySentAttachmentIds.add(mid);
+      const meta = { type:'audio', from: NAME, mime: blob.type || 'audio/webm', mid, burn: burnMode };
+
+      localWrap = addImageMessage(NAME, Date.now(), mid, burnMode);
+      const localUrl = makeObjectUrl(blob);
+      localWrap.innerHTML = `<audio controls src="${localUrl}"></audio>`;
+      localWrap.closest('.msg').classList.add('me');
+
+      const encrypted = await encryptBinary(meta, fileBuf);
+      const res = await fetch(`https://ntfy.sh/${TOPIC}`, {
+        method: 'PUT', headers: { 'X-Filename': 'voice.enc' }, body: encrypted
+      });
+      if(!res.ok){
+        const errText = await res.text().catch(()=> '');
+        throw new Error(`Server responded with ${res.status}: ${errText || res.statusText}`);
+      }
+      try{
+        const pub = await res.json();
+        if(pub && pub.id) seenIds.add(pub.id); // skip our own echo without re-downloading
+      } catch(e){ /* non-fatal */ }
+    } catch(e){
+      console.error('voice send failed', e);
+      if(localWrap){ const m = localWrap.closest('.msg'); if(m) m.remove(); }
+      alert('Voice message could not be sent: ' + (e && e.message ? e.message : e));
+    } finally {
+      updateSendability();
+    }
+  }
+
+  // ---- boot sequence ----
+  const bootLines = [
+    "booting ghostline v4.1 ...",
+    "initializing local terminal ... OK",
+    "loading webcrypto (AES-GCM 256) ... OK",
+    "connecting to relay ... OK",
+    "loading modules: presence, reactions, voice, burn ... OK",
+    "server sees ciphertext only. always.",
+    "",
+    "ready.",
+    ""
+  ];
+  const bootEl = document.getElementById('boot');
+  const introEl = document.getElementById('intro');
+  const landingEl = document.getElementById('landing');
+  let bli = 0, bci = 0;
+  function typeBoot(){
+    if(bli >= bootLines.length){
+      bootEl.innerHTML += '<span class="cursor">█</span>';
+      setTimeout(()=>{
+        bootEl.style.transition = 'opacity .4s ease';
+        bootEl.style.opacity = '0';
+        introEl.style.display = 'flex';
+        setTimeout(()=> bootEl.remove(), 400);
+      }, 400);
+      return;
+    }
+    const line = bootLines[bli];
+    if(bci <= line.length){
+      bootEl.innerHTML = bootLines.slice(0,bli).join('\n') + (bli>0?'\n':'') + line.slice(0,bci) + '<span class="cursor">█</span>';
+      bci++;
+      setTimeout(typeBoot, 12);
+    } else {
+      bli++; bci = 0;
+      setTimeout(typeBoot, 55);
+    }
+  }
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    bootEl.remove();
+    introEl.style.display = 'flex';
+  } else {
+    typeBoot();
+  }
+
+  document.getElementById('introEnterBtn').addEventListener('click', ()=>{
+    introEl.style.display = 'none';
+    landingEl.style.display = 'flex';
+  });
+
+})();
+</script>
+</body>
+</html>
